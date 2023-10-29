@@ -9,5 +9,51 @@ Using Kafka and PySpark, we need to efficiently transform, aggregate, and store 
 <img src="https://github.com/Tarifi-Hicham/user_analysis_spark_kafka/assets/125143059/a0482ded-0365-49c7-8900-b0ab96d951b8" alt="Image" width="200" height="150">
 <img src="https://github.com/Tarifi-Hicham/user_analysis_spark_kafka/assets/125143059/07021314-ece8-4d6f-a6e7-89378fddb1ff" alt="Image" width="200" height="150">
 
+## Pipeline of this project
+<img src="https://github.com/Tarifi-Hicham/user_analysis_spark_kafka/assets/125143059/4ce75a17-9f2b-45be-b2bb-e110e4ac6e32" alt="Image" width="720" height="300">
 
+## API
+The RandomUser API is a public API that provides randomly generated user data. It allows developers to retrieve fictitious user information such as names, addresses, email addresses, phone numbers, and profile images. The API is commonly used in software development for various purposes, including prototyping, testing, and generating sample data.
+
+Here's an example of the JSON structure returned by the RandomUser API for a single user:
+```
+{
+  "results": [
+    {
+      "gender": "female",
+      "name": {
+        "title": "Ms",
+        "first": "Emily",
+        "last": "Smith"
+      },
+      "email": "emily.smith@example.com",
+      "username": "crazyswan123",
+      "password": "9s8d7f6g",
+      "dob": {
+        "date": "1990-05-25",
+        "age": 33
+      },
+      "address": {
+        "street": "123 Main St",
+        "city": "New York",
+        "state": "NY",
+        "postcode": "10001",
+        "country": "United States"
+      },
+      "phone": "(123) 456-7890",
+      "picture": {
+        "large": "https://randomuser.me/api/portraits/women/1.jpg",
+        "medium": "https://randomuser.me/api/portraits/med/women/1.jpg",
+        "thumbnail": "https://randomuser.me/api/portraits/thumb/women/1.jpg"
+      }
+    }
+  ],
+  "info": {
+    "seed": "abc123",
+    "results": 1,
+    "page": 1,
+    "version": "1.3"
+  }
+}
+```
 
