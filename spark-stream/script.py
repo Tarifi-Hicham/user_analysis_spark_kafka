@@ -4,7 +4,7 @@ findspark.init()
 from pyspark import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
-from pyspark.sql.functions import from_json
+from pyspark.sql.functions import from_json, current_date, datediff, from_utc_timestamp, col, to_date, round
 from pyspark.conf import SparkConf
 from cassandra.cluster import Cluster
 SparkSession.builder.config(conf=SparkConf())
@@ -35,15 +35,14 @@ def create_cassandra_table(session,tableName):
             id UUID PRIMARY KEY,
             gender TEXT,
             title TEXT,
-            firstname TEXT,
-            lastname TEXT,
+            fullname TEXT,
             username TEXT,
             email TEXT,
             phone TEXT,
-            city TEXT,
-            state TEXT,
-            country TEXT,
+            fulladdress TEXT,
+            nationality TEXT,
             birthday TEXT,
+            age INT,
             inscription TEXT
         )
         """
@@ -52,6 +51,25 @@ def create_cassandra_table(session,tableName):
     except:
         print(f"Error in creating table {tableName}.")
 
+def save_to_cassandra(df, keyspacename, tablename):
+    # Save the DataFrame to Cassandra
+    result_df_clean.writeStream \
+        .outputMode("append") \
+        .format("org.apache.spark.sql.cassandra") \
+        .option("checkpointLocation", "./checkpoint/data") \
+        .option("keyspace", keyspacename) \
+        .option("table", tablename) \
+        .start()
+
+    # Start the streaming query
+    query = result_df_clean.writeStream \
+        .outputMode("append") \
+        .format("console") \
+        .option("format", "json") \
+        .start()
+
+    # Wait for the query to terminate
+    query.awaitTermination()
 
 # Create a session
 spark = SparkSession.builder \
@@ -60,6 +78,7 @@ spark = SparkSession.builder \
             "com.datastax.spark:spark-cassandra-connector_2.12:3.2.0") \
     .config('spark.cassandra.connection.host', 'localhost')\
     .getOrCreate()
+    # .config("spark.sql.legacy.timeParserPolicy", "LEGACY")\
 
 # Read the stream comming from kafka
 df = spark.readStream \
@@ -96,18 +115,6 @@ schema = StructType([
                                     StructField("state", StringType(), nullable=True),
                                     StructField("country", StringType(), nullable=True),
                                     StructField("postcode", IntegerType(), nullable=True),
-                                    StructField("coordinates", 
-                                                StructType([
-                                                    StructField("latitude", StringType(), nullable=True),
-                                                    StructField("longitude", StringType(), nullable=True)
-                                                ]),
-                                                nullable=True),
-                                    StructField("timezone", 
-                                                StructType([
-                                                    StructField("offset", StringType(), nullable=True),
-                                                    StructField("description", StringType(), nullable=True)
-                                                ]),
-                                                nullable=True)
                                 ]),
                                 nullable=True),
                     StructField("email", StringType(), nullable=True),
@@ -115,11 +122,6 @@ schema = StructType([
                                 StructType([
                                     StructField("uuid", StringType(), nullable=True),
                                     StructField("username", StringType(), nullable=True),
-                                    StructField("password", StringType(), nullable=True),
-                                    StructField("salt", StringType(), nullable=True),
-                                    StructField("md5", StringType(), nullable=True),
-                                    StructField("sha1", StringType(), nullable=True),
-                                    StructField("sha256", StringType(), nullable=True)
                                 ]),
                                 nullable=True),
                     StructField("dob", 
@@ -136,19 +138,6 @@ schema = StructType([
                                 nullable=True),
                     StructField("phone", StringType(), nullable=True),
                     StructField("cell", StringType(), nullable=True),
-                    StructField("id", 
-                                StructType([
-                                    StructField("name", StringType(), nullable=True),
-                                    StructField("value", StringType(), nullable=True)
-                                ]),
-                                nullable=True),
-                    StructField("picture", 
-                                StructType([
-                                    StructField("large", StringType(), nullable=True),
-                                    StructField("medium", StringType(), nullable=True),
-                                    StructField("thumbnail", StringType(), nullable=True)
-                                ]),
-                                nullable=True),
                     StructField("nat", StringType(), nullable=True)
                 ]),True),
             nullable=True
@@ -158,45 +147,25 @@ schema = StructType([
 # Apply schema on data
 spark_df_extended = spark_df.withColumn("jsonData", from_json(spark_df["value"], schema))
 
-# Select some fields
+# Select our fields
 result_df = spark_df_extended.selectExpr(
-    # "explode(jsonData.results) as result",
     "jsonData.results.login.uuid[0] as id",
     "jsonData.results.gender[0] as gender",
     "jsonData.results.name.title[0] as title",
-    "jsonData.results.name.first[0] as firstname",
-    "jsonData.results.name.last[0] as lastname",
+    "concat(jsonData.results.name.first[0], ' ', jsonData.results.name.last[0]) as fullname",
     "jsonData.results.login.username [0] as username",
     "jsonData.results.email[0] as email",
     "jsonData.results.phone[0] as phone",
-    "jsonData.results.location.city[0] as city",
-    "jsonData.results.location.state[0] as state",
-    "jsonData.results.location.country[0] as country",
+    "concat(jsonData.results.location.street.number[0], ', ', jsonData.results.location.street.name[0], \
+    ', ', jsonData.results.location.city[0], ', ', jsonData.results.location.state[0], ', ', jsonData.results.location.country[0],\
+    ', ', jsonData.results.location.postcode[0]) as fulladdress",
+    "jsonData.results.nat[0] as nationality",
     "jsonData.results.dob.date[0] as birthday",
     "jsonData.results.registered.date[0] as inscription",
-    # "jsonData.results.login.password[0] as password",
-    # "jsonData.results.location.street.number",
-    # "jsonData.results.location.street.name",
-    # "jsonData.results.location.postcode",
-    # "jsonData.results.location.coordinates.latitude",
-    # "jsonData.results.location.coordinates.longitude",
-    # "jsonData.results.location.timezone.offset",
-    # "jsonData.results.location.timezone.description",
-    # "jsonData.results.login.salt",
-    # "jsonData.results.login.md5",
-    # "jsonData.results.login.sha1",
-    # "jsonData.results.login.sha256",
-    # "jsonData.results.dob.age",
-    # "jsonData.results.registered.age",
-    # "jsonData.results.cell",
-    # "jsonData.results.id.name",
-    # "jsonData.results.id.value",
-    # "jsonData.results.picture.large",
-    # "jsonData.results.picture.medium",
-    # "jsonData.results.picture.thumbnail",
-    # "jsonData.results.nat"
 )
 
+# Calculate the age in years based on the the birthday date
+result_df = result_df.withColumn("age", round(datediff(current_date(), to_date(result_df["birthday"])) / 365).cast("integer"))
 
 print("-------------------- Connect to Cassandra -----------------------")
 cassandra_host = 'localhost'
@@ -210,62 +179,8 @@ create_cassandra_keyspace(session,keyspaceName)
 session.set_keyspace(keyspaceName)
 create_cassandra_table(session,tableName)
 
-result_df_clean = result_df.filter("id IS NOT NULL")
-# Save the DataFrame to Cassandra
-result_df_clean.writeStream \
-    .outputMode("append") \
-    .format("org.apache.spark.sql.cassandra") \
-    .option("checkpointLocation", "./checkpoint/data") \
-    .option("keyspace", keyspaceName) \
-    .option("table", tableName) \
-    .start()
+# Apply filters to respect the RGPD
+result_df_clean = result_df.filter("id IS NOT NULL and age >= 18")
 
-# Start the streaming query
-query = result_df_clean.writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("format", "json") \
-    .start()
-
-# Wait for the query to terminate
-query.awaitTermination()
-
-# Connect to cassandra
-# cassandra = SparkSession.builder \
-#     .appName("CassandraKeyspaceCreation") \
-#     .config("spark.cassandra.connection.host", "localhost") \
-#     .config("spark.cassandra.connection.port", "9042") \
-#     .getOrCreate()
-
-# # print(cassandra)
-# cassandra.sql("CREATE KEYSPACE IF NOT EXISTS test_keyspace WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};")
-
-
-# -------------------------------------------------------------------------------
-# Save data to Cassandra
-# query = result_df.writeStream \
-#     .outputMode("append") \
-#     .format("org.apache.spark.sql.cassandra") \
-#     .option("keyspace", "hicham_keyspace") \
-#     .option("table", "hicham_table") \
-#     .option("spark.cassandra.connection.host", "localhost") \
-#     .option("spark.cassandra.connection.port", "9042") \
-#     .start()
-
-# query.awaitTermination()
-
-# # Set up Cassandra connector
-# cassandraConfig = {
-#     "keyspace": "your_keyspace_name",  # Replace with your Cassandra keyspace
-#     "table": "your_table_name",  # Replace with your Cassandra table
-#     "spark.cassandra.connection.host": "localhost",  # Cassandra host address
-#     "spark.cassandra.connection.port": "9042"  # Cassandra port
-# }
-
-# # Save transformed data to Cassandra
-# transformedStream.saveToCassandra(**cassandraConfig)
-
-# # Start the streaming context
-# ssc.start()
-# ssc.awaitTermination()
-
+# Insert data to cassandra
+save_to_cassandra(result_df_clean, keyspaceName, tableName)
