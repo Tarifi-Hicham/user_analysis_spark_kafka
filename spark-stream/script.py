@@ -53,7 +53,7 @@ def create_cassandra_table(session,tableName):
 
 def save_to_cassandra(df, keyspacename, tablename):
     # Save the DataFrame to Cassandra
-    result_df_clean.writeStream \
+    df.writeStream \
         .outputMode("append") \
         .format("org.apache.spark.sql.cassandra") \
         .option("checkpointLocation", "./checkpoint/data") \
@@ -62,7 +62,7 @@ def save_to_cassandra(df, keyspacename, tablename):
         .start()
 
     # Start the streaming query
-    query = result_df_clean.writeStream \
+    query = df.writeStream \
         .outputMode("append") \
         .format("console") \
         .option("format", "json") \
