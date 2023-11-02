@@ -4,7 +4,7 @@ findspark.init()
 from pyspark import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
-from pyspark.sql.functions import from_json, current_date, datediff, from_utc_timestamp, col, to_date, round
+from pyspark.sql.functions import from_json, current_date, datediff, to_date, round
 from pyspark.conf import SparkConf
 from cassandra.cluster import Cluster
 SparkSession.builder.config(conf=SparkConf())
@@ -71,12 +71,30 @@ def save_to_cassandra(df, keyspacename, tablename):
     # Wait for the query to terminate
     query.awaitTermination()
 
+def save_to_mongo(df, uri, db, collection):
+    # Create query to insert data
+    query = df.writeStream \
+        .foreachBatch(lambda batchDF, batchId: batchDF.write \
+            .format("mongo") \
+            .option("uri", uri) \
+            .option("database", db) \
+            .option("collection", collection) \
+            .mode("append") \
+            .save()
+        ).outputMode("append") \
+        .start()
+
+    # Wait for the query to terminate
+    query.awaitTermination()
+
 # Create a session
 spark = SparkSession.builder \
     .appName("KafkaSparkIntegration") \
     .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.2.4,"
-            "com.datastax.spark:spark-cassandra-connector_2.12:3.2.0") \
-    .config('spark.cassandra.connection.host', 'localhost')\
+            "com.datastax.spark:spark-cassandra-connector_2.12:3.2.0,"
+            "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
+    .config("spark.sql.streaming.forceDeleteTempCheckpointLocation", "true") \
+    .config("spark.cassandra.connection.host", "localhost") \
     .getOrCreate()
     # .config("spark.sql.legacy.timeParserPolicy", "LEGACY")\
 
@@ -153,7 +171,7 @@ result_df = spark_df_extended.selectExpr(
     "jsonData.results.gender[0] as gender",
     "jsonData.results.name.title[0] as title",
     "concat(jsonData.results.name.first[0], ' ', jsonData.results.name.last[0]) as fullname",
-    "jsonData.results.login.username [0] as username",
+    "jsonData.results.login.username[0] as username",
     "jsonData.results.email[0] as email",
     "jsonData.results.phone[0] as phone",
     "concat(jsonData.results.location.street.number[0], ', ', jsonData.results.location.street.name[0], \
@@ -167,20 +185,34 @@ result_df = spark_df_extended.selectExpr(
 # Calculate the age in years based on the the birthday date
 result_df = result_df.withColumn("age", round(datediff(current_date(), to_date(result_df["birthday"])) / 365).cast("integer"))
 
-print("-------------------- Connect to Cassandra -----------------------")
-cassandra_host = 'localhost'
-cassandra_port = 9042
-keyspaceName = 'hicham_keyspace'
-tableName = 'user_table'
-
-
-session = connect_to_cassandra(cassandra_host,cassandra_port)
-create_cassandra_keyspace(session,keyspaceName)
-session.set_keyspace(keyspaceName)
-create_cassandra_table(session,tableName)
-
 # Apply filters to respect the RGPD
 result_df_clean = result_df.filter("id IS NOT NULL and age >= 18")
 
-# Insert data to cassandra
-save_to_cassandra(result_df_clean, keyspaceName, tableName)
+# print("-------------------- Connect to Cassandra -----------------------")
+# cassandra_host = 'localhost'
+# cassandra_port = 9042
+# keyspaceName = 'hicham_keyspace'
+# tableName = 'user_table'
+
+# session = connect_to_cassandra(cassandra_host,cassandra_port)
+# create_cassandra_keyspace(session,keyspaceName)
+# session.set_keyspace(keyspaceName)
+# create_cassandra_table(session,tableName)
+
+# # Insert data to cassandra
+# save_to_cassandra(result_df_clean, keyspaceName, tableName)
+# print("-------------------------------------------------------------")
+
+print("-------------------- Connect to Mongo -----------------------")
+# MongoDB connection details
+mongo_uri = "mongodb://localhost:27017"  
+mongo_db_name = "users_db"
+collection_name = "users_collection"
+
+# Select columns to insert
+result_df_mongo = result_df_clean.select("gender","fullname","username","email","phone","fulladdress","age","inscription","nationality")
+
+# Insert data to MongoDB
+save_to_mongo(result_df_mongo, mongo_uri, mongo_db_name, collection_name)
+
+print("-------------------------------------------------------------")
