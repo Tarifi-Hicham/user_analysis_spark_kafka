@@ -1,12 +1,14 @@
+import time
 import findspark
 findspark.init()
 
 from pyspark import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
-from pyspark.sql.functions import from_json, current_date, datediff, to_date, round
+from pyspark.sql.functions import from_json, current_date, datediff, to_date, round, udf
 from pyspark.conf import SparkConf
 from cassandra.cluster import Cluster
+import bcrypt
 SparkSession.builder.config(conf=SparkConf())
 
 def connect_to_cassandra(host,port):
@@ -34,10 +36,9 @@ def create_cassandra_table(session,tableName):
         CREATE TABLE IF NOT EXISTS {tableName} (
             id UUID PRIMARY KEY,
             gender TEXT,
-            title TEXT,
             fullname TEXT,
             username TEXT,
-            email TEXT,
+            email_domaine TEXT,
             phone TEXT,
             fulladdress TEXT,
             nationality TEXT,
@@ -53,23 +54,14 @@ def create_cassandra_table(session,tableName):
 
 def save_to_cassandra(df, keyspacename, tablename):
     # Save the DataFrame to Cassandra
-    df.writeStream \
+    query = df.writeStream \
         .outputMode("append") \
         .format("org.apache.spark.sql.cassandra") \
         .option("checkpointLocation", "./checkpoint/data") \
         .option("keyspace", keyspacename) \
         .option("table", tablename) \
         .start()
-
-    # Start the streaming query
-    query = df.writeStream \
-        .outputMode("append") \
-        .format("console") \
-        .option("format", "json") \
-        .start()
-
-    # Wait for the query to terminate
-    query.awaitTermination()
+    return query
 
 def save_to_mongo(df, uri, db, collection):
     # Create query to insert data
@@ -83,9 +75,7 @@ def save_to_mongo(df, uri, db, collection):
             .save()
         ).outputMode("append") \
         .start()
-
-    # Wait for the query to terminate
-    query.awaitTermination()
+    return query
 
 # Create a session
 spark = SparkSession.builder \
@@ -169,10 +159,9 @@ spark_df_extended = spark_df.withColumn("jsonData", from_json(spark_df["value"],
 result_df = spark_df_extended.selectExpr(
     "jsonData.results.login.uuid[0] as id",
     "jsonData.results.gender[0] as gender",
-    "jsonData.results.name.title[0] as title",
     "concat(jsonData.results.name.first[0], ' ', jsonData.results.name.last[0]) as fullname",
     "jsonData.results.login.username[0] as username",
-    "jsonData.results.email[0] as email",
+    "split(jsonData.results.email[0], '@')[1] as email_domaine",
     "jsonData.results.phone[0] as phone",
     "concat(jsonData.results.location.street.number[0], ', ', jsonData.results.location.street.name[0], \
     ', ', jsonData.results.location.city[0], ', ', jsonData.results.location.state[0], ', ', jsonData.results.location.country[0],\
@@ -182,37 +171,46 @@ result_df = spark_df_extended.selectExpr(
     "jsonData.results.registered.date[0] as inscription",
 )
 
+# Define a UDF for hashing data
+encrypt_data = udf(lambda data: bcrypt.hashpw(str(data).encode(), bcrypt.gensalt()), returnType=StringType())
+
+# Apply the encryption on phone and fulladdress to respect the RGPD
+result_df = result_df.withColumn("phone", encrypt_data(result_df.phone))
+result_df = result_df.withColumn("fulladdress", encrypt_data(result_df.fulladdress))
+
 # Calculate the age in years based on the the birthday date
 result_df = result_df.withColumn("age", round(datediff(current_date(), to_date(result_df["birthday"])) / 365).cast("integer"))
 
 # Apply filters to respect the RGPD
 result_df_clean = result_df.filter("id IS NOT NULL and age >= 18")
 
-# print("-------------------- Connect to Cassandra -----------------------")
-# cassandra_host = 'localhost'
-# cassandra_port = 9042
-# keyspaceName = 'hicham_keyspace'
-# tableName = 'user_table'
+print("********************* Connect to Cassandra *********************")
+cassandra_host = 'localhost'
+cassandra_port = 9042
+keyspaceName = 'hicham_keyspace'
+tableName = 'user_table'
 
-# session = connect_to_cassandra(cassandra_host,cassandra_port)
-# create_cassandra_keyspace(session,keyspaceName)
-# session.set_keyspace(keyspaceName)
-# create_cassandra_table(session,tableName)
+session = connect_to_cassandra(cassandra_host,cassandra_port)
+create_cassandra_keyspace(session,keyspaceName)
+session.set_keyspace(keyspaceName)
+create_cassandra_table(session,tableName)
 
-# # Insert data to cassandra
-# save_to_cassandra(result_df_clean, keyspaceName, tableName)
-# print("-------------------------------------------------------------")
+# Insert data to cassandra
+query = save_to_cassandra(result_df_clean, keyspaceName, tableName)
+print("****************************************************************")
 
-print("-------------------- Connect to Mongo -----------------------")
+print("*********************** Connect to Mongo ***********************")
 # MongoDB connection details
 mongo_uri = "mongodb://localhost:27017"  
-mongo_db_name = "users_db"
-collection_name = "users_collection"
+mongo_db = "users_db"
+mongo_collection = "users_collection"
 
 # Select columns to insert
-result_df_mongo = result_df_clean.select("gender","fullname","username","email","phone","fulladdress","age","inscription","nationality")
+result_df_mongo = result_df_clean.select("age","gender","email_domaine","inscription","nationality")
 
 # Insert data to MongoDB
-save_to_mongo(result_df_mongo, mongo_uri, mongo_db_name, collection_name)
+query = save_to_mongo(result_df_mongo, mongo_uri, mongo_db, mongo_collection)
 
-print("-------------------------------------------------------------")
+query.awaitTermination()
+
+print("****************************************************************")
