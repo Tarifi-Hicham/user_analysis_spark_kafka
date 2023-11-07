@@ -71,7 +71,7 @@ Before running the script, make sure you have the following dependencies install
 
 - <a href='https://kafka.apache.org/downloads'>Apache Kafka</a>
 - <a href='https://spark.apache.org/docs/latest/api/python/getting_started/install.html'>PySpark</a>
-- <a href='https://cassandra.apache.org/_/download.html'>Cassandra<\a>
+- <a href='https://cassandra.apache.org/_/download.html'>Cassandra</a>
 - <a href='https://www.mongodb.com/try/download/community'>MongoDB</a>
 
 ## Script Overview
